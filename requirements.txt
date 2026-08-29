@@ -1,0 +1,4 @@
+# Runtime: none. hackathon/alpaca_cli.py talks to the official Alpaca CLI
+# (a Go binary, installed separately -- see README) over a subprocess; it
+# does not use the alpaca-py Python SDK.
+pytest==9.0.2
