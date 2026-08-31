@@ -1,4 +1,4 @@
-"""Ruta oficial del hackathon hacia Alpaca: su CLI, nunca HTTP propio."""
+"""The hackathon's official route to Alpaca: its CLI, never a homegrown HTTP client."""
 from __future__ import annotations
 
 import json
@@ -13,11 +13,27 @@ class AlpacaCLIError(RuntimeError):
 
 
 def _environment(source: Mapping[str, str] | None = None) -> dict[str, str]:
+    """Resolve the dedicated account's credentials. NO FALLBACK, on purpose.
+
+    This used to read `ALPACA_HACKATON_API_KEY or ALPACA_API_KEY`. On a laptop
+    that fallback is a convenience; on a host that also runs a production bot it
+    is a loaded gun: if the dedicated variables were ever missing, the agent
+    would inherit the production account's credentials and send option orders
+    into it. The convenience is worth nothing and the failure mode is
+    unbounded, so the fallback is gone -- missing variables now fail loudly.
+
+    It also refuses the generic variables outright: inheriting them silently is
+    the exact accident this is meant to prevent.
+    """
     env = dict(source or os.environ)
-    key = env.get("ALPACA_HACKATON_API_KEY") or env.get("ALPACA_API_KEY")
-    secret = env.get("ALPACA_HACKATON_SECRET_KEY") or env.get("ALPACA_SECRET_KEY")
+    key = env.get("ALPACA_HACKATON_API_KEY")
+    secret = env.get("ALPACA_HACKATON_SECRET_KEY")
     if not key or not secret:
-        raise AlpacaCLIError("faltan credenciales de la cuenta paper del hackathon")
+        raise AlpacaCLIError(
+            "faltan ALPACA_HACKATON_API_KEY / ALPACA_HACKATON_SECRET_KEY. "
+            "No se cae a las genericas a proposito: en una maquina que tambien "
+            "corre el bot de produccion, ese respaldo mandaria ordenes a la "
+            "cuenta equivocada")
     env["ALPACA_API_KEY"] = key
     env["ALPACA_SECRET_KEY"] = secret
     env.pop("ALPACA_LIVE_TRADE", None)

@@ -135,6 +135,18 @@ of paper trading can prove.
   and the official-CLI wrapper — each independently testable with an
   injected double, which is exactly what the test suite does.
 
+## Evidence: the decision log
+
+`evidence/cycles_<fecha>.jsonl` is a **snapshot**, not the live log -- the
+real one grows every 15 minutes and does not belong in a public repo's
+history. `cycles_2026-08-29.jsonl` was cut at **2026-08-29 (UTC)** and holds
+32 cycles, one per row, each with its gate-rejection reason. **31 of those 32
+rows have no timestamp**: until 29/08 only error cycles recorded one, a bug
+fixed the same day (every row now gets its own `cuando`) but not
+backfillable -- the missing hours are gone, not invented. Only the last row
+of this snapshot carries a real `cuando`. A later snapshot, once the fixed
+recorder has run for a full session, will show distinct timestamps per row.
+
 ## Repository layout
 
 ```

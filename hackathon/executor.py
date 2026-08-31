@@ -1,4 +1,4 @@
-"""Ejecutor paper de opciones: las puertas son la interfaz principal."""
+"""Paper options executor: the gates are the main interface."""
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -18,10 +18,10 @@ class Limits:
 
 class Executor:
     def __init__(self, gateway: Any, *, limits: Limits | None = None,
-                 registrar: Callable[[dict], None] | None = None):
+                 record: Callable[[dict], None] | None = None):
         self.gateway = gateway
         self.limits = limits or Limits()
-        self.registrar = registrar or (lambda _row: None)
+        self.record = record or (lambda _row: None)
 
     @staticmethod
     def required_capital(candidate: Mapping[str, Any], *, qty: int = 1) -> float:
@@ -29,18 +29,19 @@ class Executor:
 
     def _reject(self, code: str, motivo: str) -> dict:
         row = {"decision": "rechazada", "reason_code": code, "motivo": motivo}
-        self.registrar(row)
+        self.record(row)
         return row
 
     @staticmethod
-    def _contratos(pos: Mapping[str, Any]) -> int:
-        """Contratos de una posicion, EN VALOR ABSOLUTO.
+    def _contract_count(pos: Mapping[str, Any]) -> int:
+        """Contracts in a position, IN ABSOLUTE VALUE.
 
-        Una put vendida llega de Alpaca con `qty` negativo, y toda la
-        estrategia son puts vendidas. Sumando el signo, dos cortas sobre SPY
-        daban -2, y `-2 + 1 > 2` es falso: la puerta que impide amontonar
-        riesgo sobre un subyacente no saltaba nunca. Sus tests no lo veian
-        porque usaban posiciones sin `qty`, y el defecto por defecto vale 1.
+        A sold put arrives from Alpaca with a negative `qty`, and the whole
+        strategy is sold puts. Summing with sign, two shorts on SPY added up
+        to -2, and `-2 + 1 > 2` is false: the gate meant to stop risk from
+        piling up on one underlying never tripped. Its tests did not catch
+        this because they used positions with no `qty`, and the default
+        default is 1.
         """
         return abs(int(float(pos.get("qty", 1) or 1)))
 
@@ -52,13 +53,13 @@ class Executor:
             return self._reject("CAPITAL", f"exige {required:.2f}; disponible {buying_power:.2f}")
 
         same_underlying = sum(
-            self._contratos(pos) for pos in positions
+            self._contract_count(pos) for pos in positions
             if pos.get("underlying") == candidate["underlying"])
         if same_underlying + qty > self.limits.max_contracts_underlying:
             return self._reject("CONCENTRACION_SUBYACENTE", candidate["underlying"])
 
         same_expiry = sum(
-            self._contratos(pos) for pos in positions
+            self._contract_count(pos) for pos in positions
             if pos.get("expiry") == candidate["expiry"])
         if same_expiry + qty > self.limits.max_contracts_expiry:
             return self._reject("CONCENTRACION_VENCIMIENTO", candidate["expiry"])
@@ -88,19 +89,20 @@ class Executor:
         }
         try:
             response = self.gateway.submit_option(order, dry_run=dry_run)
-        except Exception as exc:  # transporte: nunca registrar posición
+        except Exception as exc:  # transport: never record a position
             row = {"decision": "error", "reason_code": "API",
                    "motivo": str(exc), "order": order}
-            self.registrar(row)
+            self.record(row)
             return row
-        # El dry_run era un CANDADO en el codigo: `dry_run=True` fijo. Cumplia
-        # el criterio -- que pedia dry-run -- y a cambio el agente no podia
-        # mandar una orden jamas, con un concurso que puntua P&L el primero.
-        # Sigue siendo el defecto por defecto: enviar de verdad se pide.
+        # dry_run used to be a LOCK in the code: `dry_run=True` fixed. It met
+        # the letter of the criterion -- which asked for dry-run -- and in
+        # exchange the agent could never send a real order, in a contest that
+        # scores on P&L above all else. It still defaults to True: sending a
+        # real order has to be requested explicitly.
         row = {"decision": "dry_run" if dry_run else "enviada",
                "reason_code": None,
                "motivo": ("orden validada; no enviada" if dry_run
                           else "orden enviada a la cuenta paper"),
                "order": order, "response": response}
-        self.registrar(row)
+        self.record(row)
         return row

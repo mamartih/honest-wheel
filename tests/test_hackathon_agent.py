@@ -1,266 +1,346 @@
-"""El lazo autonomo del hackathon: agent.ciclo().
+"""N12 -- the hackathon's autonomous loop. Objective test, written BEFORE.
 
-Un ciclo decide una de tres cosas -- abrir, rodar o no hacer nada -- y en
-las tres deja una fila registrada con su motivo. El control positivo va
-primero porque es el que se verifica primero: construye la orden esperada
-contra una cadena y unas posiciones conocidas.
+This file's positive control was verified reachable against a disposable
+reference implementation before the task was handed off. On 26/08 the lane
+was given an impossible test to pass and spent four rounds figuring that out;
+the failure was in the spec, not in the model.
 """
 from datetime import datetime, timezone
 
 import pytest
 
 pytest.importorskip("hackathon.agent",
-                    reason="hackathon/agent.py no existe todavia")
+                    reason="N12 aun no entregada: hackathon/agent.py no existe")
 
-from hackathon.agent import ciclo  # noqa: E402
+from hackathon.agent import cycle  # noqa: E402
 
-AHORA = datetime(2026, 9, 1, 15, 30, tzinfo=timezone.utc)
+NOW = datetime(2026, 9, 1, 15, 30, tzinfo=timezone.utc)
 
-CONTRATO = {"symbol": "SPY260930P00600000", "underlying": "SPY",
+CONTRACT = {"symbol": "SPY260930P00600000", "underlying": "SPY",
             "expiry": "2026-09-30", "strike": 600.0, "delta": -0.25,
             "bid": 5.90, "ask": 6.00, "open_interest": 4200, "volume": 310}
 
-ABIERTA = {"underlying": "SPY", "expiry": "2026-09-30", "qty": -1}
+OPEN_POSITION = {"underlying": "SPY", "expiry": "2026-09-30", "qty": -1}
 
 
-def _entorno(**cambios):
-    """Un entorno que pasa todas las puertas, salvo lo que se cambie."""
-    base = dict(posiciones=lambda: [], cadena=lambda: [CONTRATO],
-                puertas=[], enviar=lambda orden: {"id": "ord-1", **orden},
-                registrar=lambda fila: None)
-    base.update(cambios)
+def _env(**overrides):
+    """An environment that passes every gate, except what gets overridden."""
+    base = dict(positions=lambda: [], chain=lambda: [CONTRACT],
+                gates=[], send=lambda order: {"id": "ord-1", **order},
+                record=lambda row: None)
+    base.update(overrides)
     return base
 
 
-# --- 4. el control positivo, y va el primero porque es el que se verifica ---
+# --- 4. the positive control, and it goes first because it's the one that was verified ---
 
-def test_control_positivo_construye_la_orden():
-    filas = []
-    resultado = ciclo(AHORA, **_entorno(registrar=filas.append))
+def test_positive_control_builds_the_order():
+    rows = []
+    result = cycle(NOW, **_env(record=rows.append))
 
-    assert resultado["decision"] == "abrir"
-    assert resultado["orden"] is not None
-    assert resultado["orden"]["symbol"] == CONTRATO["symbol"]
-    assert resultado["puerta_que_rechazo"] is None
-    assert resultado["motivo"]
-    assert len(filas) == 1
+    assert result["decision"] == "abrir"
+    assert result["orden"] is not None
+    assert result["orden"]["symbol"] == CONTRACT["symbol"]
+    assert result["puerta_que_rechazo"] is None
+    assert result["motivo"]
+    assert len(rows) == 1
 
 
-# --- 1. idempotencia --------------------------------------------------------
+# --- 1. idempotency --------------------------------------------------------
 
-def test_dos_ciclos_no_abren_dos_veces_el_mismo_vencimiento():
-    abiertas = []
+def test_two_cycles_dont_open_the_same_expiry_twice():
+    opened = []
 
-    def enviar(orden):
-        abiertas.append(orden)
-        return {"id": f"ord-{len(abiertas)}", **orden}
+    def send(order):
+        opened.append(order)
+        return {"id": f"ord-{len(opened)}", **order}
 
-    def posiciones():
+    def positions():
         return [{"underlying": o["underlying"], "expiry": o["expiry"],
-                 "qty": -1} for o in abiertas]
+                 "qty": -1} for o in opened]
 
-    entorno = _entorno(posiciones=posiciones, enviar=enviar)
-    primero = ciclo(AHORA, **entorno)
-    segundo = ciclo(AHORA, **entorno)
+    env = _env(positions=positions, send=send)
+    first = cycle(NOW, **env)
+    second = cycle(NOW, **env)
 
-    assert primero["decision"] == "abrir"
-    assert segundo["decision"] == "nada"
-    assert len(abiertas) == 1, "abrio dos veces el mismo subyacente y vencimiento"
-
-
-def test_la_posicion_ya_abierta_se_dice_en_el_motivo():
-    resultado = ciclo(AHORA, **_entorno(posiciones=lambda: [ABIERTA]))
-
-    assert resultado["decision"] == "nada"
-    assert resultado["orden"] is None
-    assert "SPY" in resultado["motivo"] or "2026-09-30" in resultado["motivo"]
+    assert first["decision"] == "abrir"
+    assert second["decision"] == "nada"
+    assert len(opened) == 1, "abrio dos veces el mismo subyacente y vencimiento"
 
 
-# --- 2. la inaccion se registra ---------------------------------------------
+def test_the_already_open_position_is_named_in_the_reason():
+    result = cycle(NOW, **_env(positions=lambda: [OPEN_POSITION]))
 
-@pytest.mark.parametrize("cambio,caso", [
-    ({"cadena": lambda: []}, "cadena vacia"),
-    ({"posiciones": lambda: [ABIERTA]}, "ya hay posicion"),
-    ({"puertas": [lambda orden: "CAPITAL insuficiente"]}, "puerta rechaza"),
+    assert result["decision"] == "nada"
+    assert result["orden"] is None
+    assert "SPY" in result["motivo"] or "2026-09-30" in result["motivo"]
+
+
+# --- 2. inaction gets recorded ---------------------------------------------
+
+@pytest.mark.parametrize("override,case", [
+    ({"chain": lambda: []}, "cadena vacia"),
+    ({"positions": lambda: [OPEN_POSITION]}, "ya hay posicion"),
+    ({"gates": [lambda order: "CAPITAL insuficiente"]}, "puerta rechaza"),
 ])
-def test_un_ciclo_sin_operacion_deja_fila_con_motivo(cambio, caso):
-    filas = []
-    resultado = ciclo(AHORA, **_entorno(registrar=filas.append, **cambio))
+def test_a_cycle_with_no_trade_leaves_a_row_with_a_reason(override, case):
+    rows = []
+    result = cycle(NOW, **_env(record=rows.append, **override))
 
-    assert resultado["decision"] == "nada", caso
-    assert len(filas) == 1, f"{caso}: un ciclo sin operar no dejo rastro"
-    assert filas[0]["motivo"], f"{caso}: la fila no dice por que"
-    assert filas[0]["decision"] == "nada"
-
-
-def test_la_cadena_vacia_no_revienta():
-    resultado = ciclo(AHORA, **_entorno(cadena=lambda: []))
-    assert resultado["decision"] == "nada"
-    assert resultado["motivo"]
+    assert result["decision"] == "nada", case
+    assert len(rows) == 1, f"{case}: un ciclo sin operar no dejo rastro"
+    assert rows[0]["motivo"], f"{case}: la fila no dice por que"
+    assert rows[0]["decision"] == "nada"
 
 
-# --- 3. las puertas mandan y su motivo viaja --------------------------------
-
-def test_una_puerta_que_rechaza_impide_el_envio_y_su_motivo_llega():
-    enviados = []
-    puerta = lambda orden: "SPREAD 3.2% supera el 3%"  # noqa: E731
-    filas = []
-
-    resultado = ciclo(AHORA, **_entorno(
-        puertas=[puerta], registrar=filas.append,
-        enviar=lambda orden: enviados.append(orden)))
-
-    assert enviados == [], "mando la orden con una puerta cerrada"
-    assert resultado["decision"] == "nada"
-    assert resultado["puerta_que_rechazo"] == "SPREAD 3.2% supera el 3%"
-    assert "SPREAD" in filas[0]["motivo"]
+def test_an_empty_chain_does_not_crash():
+    result = cycle(NOW, **_env(chain=lambda: []))
+    assert result["decision"] == "nada"
+    assert result["motivo"]
 
 
-def test_se_para_en_la_primera_puerta_y_nombra_esa():
-    llamadas = []
+# --- 3. gates rule and their reason travels ---------------------------------
 
-    def puerta(nombre):
-        def _puerta(orden):
-            llamadas.append(nombre)
-            return f"{nombre} rechaza"
-        return _puerta
+def test_a_rejecting_gate_blocks_the_send_and_its_reason_arrives():
+    sent = []
+    gate = lambda order: "SPREAD 3.2% supera el 3%"  # noqa: E731
+    rows = []
 
-    resultado = ciclo(AHORA, **_entorno(
-        puertas=[puerta("CAPITAL"), puerta("LIQUIDEZ")]))
+    result = cycle(NOW, **_env(
+        gates=[gate], record=rows.append,
+        send=lambda order: sent.append(order)))
 
-    assert llamadas == ["CAPITAL"], "siguio evaluando puertas tras el rechazo"
-    assert resultado["puerta_que_rechazo"] == "CAPITAL rechaza"
-
-
-def test_las_puertas_que_dejan_pasar_no_estorban():
-    resultado = ciclo(AHORA, **_entorno(
-        puertas=[lambda orden: None, lambda orden: None]))
-
-    assert resultado["decision"] == "abrir"
-    assert resultado["puerta_que_rechazo"] is None
+    assert sent == [], "mando la orden con una puerta cerrada"
+    assert result["decision"] == "nada"
+    assert result["puerta_que_rechazo"] == "SPREAD 3.2% supera el 3%"
+    assert "SPREAD" in rows[0]["motivo"]
 
 
-# --- 5. un fallo de red no deja estado a medias -----------------------------
+def test_it_stops_at_the_first_gate_and_names_that_one():
+    calls = []
 
-def test_un_fallo_de_envio_no_deja_media_posicion():
-    filas = []
+    def gate(name):
+        def _gate(order):
+            calls.append(name)
+            return f"{name} rechaza"
+        return _gate
 
-    def enviar(orden):
+    result = cycle(NOW, **_env(
+        gates=[gate("CAPITAL"), gate("LIQUIDEZ")]))
+
+    assert calls == ["CAPITAL"], "siguio evaluando puertas tras el rechazo"
+    assert result["puerta_que_rechazo"] == "CAPITAL rechaza"
+
+
+def test_gates_that_pass_dont_get_in_the_way():
+    result = cycle(NOW, **_env(
+        gates=[lambda order: None, lambda order: None]))
+
+    assert result["decision"] == "abrir"
+    assert result["puerta_que_rechazo"] is None
+
+
+# --- 5. a network failure leaves no half-done state -------------------------
+
+def test_a_send_failure_leaves_no_half_position():
+    rows = []
+
+    def send(order):
         raise ConnectionError("alpaca no responde")
 
-    resultado = ciclo(AHORA, **_entorno(enviar=enviar, registrar=filas.append))
+    result = cycle(NOW, **_env(send=send, record=rows.append))
 
-    assert resultado["decision"] == "nada"
-    assert resultado["orden"] is None, "registro una orden que nunca salio"
-    assert "alpaca no responde" in resultado["motivo"]
-    assert len(filas) == 1, "el fallo de red no dejo rastro"
+    assert result["decision"] == "nada"
+    assert result["orden"] is None, "registro una orden que nunca salio"
+    assert "alpaca no responde" in result["motivo"]
+    assert len(rows) == 1, "el fallo de red no dejo rastro"
 
 
-def test_el_fallo_de_envio_no_se_traga_como_si_nada():
-    """Distinguir 'no habia nada que hacer' de 'lo intente y fallo'."""
-    sin_fallo = ciclo(AHORA, **_entorno(cadena=lambda: []))
+def test_a_send_failure_is_not_swallowed_silently():
+    """Tell apart 'there was nothing to do' from 'I tried and it failed'."""
+    no_failure = cycle(NOW, **_env(chain=lambda: []))
 
-    def enviar(orden):
+    def send(order):
         raise ConnectionError("alpaca no responde")
 
-    con_fallo = ciclo(AHORA, **_entorno(enviar=enviar))
+    with_failure = cycle(NOW, **_env(send=send))
 
-    assert sin_fallo["motivo"] != con_fallo["motivo"], (
+    assert no_failure["motivo"] != with_failure["motivo"], (
         "un ciclo tranquilo y uno con la API caida cuentan lo mismo")
 
 
-# --- el contrato de la firma ------------------------------------------------
+# --- the signature's contract ------------------------------------------------
 
-def test_ciclo_se_puede_llamar_solo_con_ahora():
-    """Los inyectables son para el test; en produccion la firma es ciclo(ahora)."""
+def test_cycle_can_be_called_with_just_now():
+    """The injectables are for tests; in production the signature is cycle(now)."""
     import inspect
 
-    firma = inspect.signature(ciclo)
-    obligatorios = [p for p in firma.parameters.values()
-                    if p.default is inspect.Parameter.empty
-                    and p.kind is not p.VAR_KEYWORD]
-    assert [p.name for p in obligatorios] == ["ahora"]
+    signature = inspect.signature(cycle)
+    required_params = [p for p in signature.parameters.values()
+                       if p.default is inspect.Parameter.empty
+                       and p.kind is not p.VAR_KEYWORD]
+    assert [p.name for p in required_params] == ["now"]
 
 
-def test_no_se_llama_a_now_dentro():
-    """`ahora` entra por parametro o el lazo no se puede probar en el pasado."""
-    import hackathon.agent as agente
+def test_now_is_not_called_from_inside():
+    """`now` comes in as a parameter or the loop can't be tested in the past."""
+    import hackathon.agent as agent_module
 
-    fuente = __import__("inspect").getsource(agente)
-    assert "datetime.now(" not in fuente and "utcnow(" not in fuente
+    source = __import__("inspect").getsource(agent_module)
+    assert "datetime.now(" not in source and "utcnow(" not in source
 
 
-# --- rodar, y el orden de preferencia dentro de la cadena -------------------
-#
-# Dos comportamientos que el primer corte del agente no cubria: una posicion
-# cerca de vencer tiene que RODARSE, no ignorarse: y cuando el primer
-# contrato de la cadena ya esta ocupado, el agente tiene que probar el
-# siguiente en vez de rendirse.
+# --- N14 and N15, written on 28/08 after reading the delivery ----------------
+# N14: the spec declared three decisions -abrir, rodar, nada- and my 14 cases
+# only measured two. The agent doesn't know how to roll because nobody asked
+# it to.
+# N15: idempotency only looks at contracts[0], and if that one is already
+# open it returns "nada" without looking at the rest of the chain. It opens
+# SPY on day 1 and never trades again all week.
 
-VENCE_PRONTO = {"underlying": "SPY", "expiry": "2026-09-04", "qty": -1,
+EXPIRES_SOON = {"underlying": "SPY", "expiry": "2026-09-04", "qty": -1,
                 "symbol": "SPY260904P00590000"}
-OTRO = {"symbol": "QQQ260930P00480000", "underlying": "QQQ",
-        "expiry": "2026-09-30", "strike": 480.0, "delta": -0.24,
-        "bid": 4.10, "ask": 4.20, "open_interest": 3100, "volume": 260}
+OTHER = {"symbol": "QQQ260930P00480000", "underlying": "QQQ",
+         "expiry": "2026-09-30", "strike": 480.0, "delta": -0.24,
+         "bid": 4.10, "ask": 4.20, "open_interest": 3100, "volume": 260}
 
 
-def test_una_posicion_que_vence_pronto_se_rueda():
-    filas = []
-    resultado = ciclo(AHORA, **_entorno(
-        posiciones=lambda: [VENCE_PRONTO], registrar=filas.append))
+def test_a_position_expiring_soon_gets_ROLLED():
+    rows = []
+    result = cycle(NOW, **_env(
+        positions=lambda: [EXPIRES_SOON], record=rows.append))
 
-    assert resultado["decision"] == "rodar", (
-        f"no rodo: {resultado['decision']} -- {resultado['motivo']}")
-    assert resultado["orden"] is not None
-    assert len(filas) == 1
-
-
-def test_la_fila_de_rodar_nombra_el_viejo_y_el_nuevo():
-    """Rodar sin decir QUE se cierra y QUE se abre no se puede auditar."""
-    filas = []
-    ciclo(AHORA, **_entorno(posiciones=lambda: [VENCE_PRONTO],
-                            registrar=filas.append))
-    texto = str(filas[0])
-    assert VENCE_PRONTO["expiry"] in texto, "no dice que vencimiento cierra"
-    assert CONTRATO["symbol"] in texto, "no dice que contrato abre"
+    assert result["decision"] == "rodar", (
+        f"no rodo: {result['decision']} -- {result['motivo']}")
+    assert result["orden"] is not None
+    assert len(rows) == 1
 
 
-def test_una_posicion_lejana_no_se_rueda():
-    """El control negativo: rodar siempre seria peor que no rodar nunca."""
-    lejana = dict(VENCE_PRONTO, expiry="2026-10-30")
-    resultado = ciclo(AHORA, **_entorno(posiciones=lambda: [lejana]))
-    assert resultado["decision"] != "rodar"
+def test_the_roll_row_names_the_old_and_the_new():
+    """A roll that doesn't say WHAT closes and WHAT opens can't be audited."""
+    rows = []
+    cycle(NOW, **_env(positions=lambda: [EXPIRES_SOON],
+                       record=rows.append))
+    text = str(rows[0])
+    assert EXPIRES_SOON["expiry"] in text, "no dice que vencimiento cierra"
+    assert CONTRACT["symbol"] in text, "no dice que contrato abre"
 
 
-def test_rodar_respeta_las_puertas():
-    resultado = ciclo(AHORA, **_entorno(
-        posiciones=lambda: [VENCE_PRONTO],
-        puertas=[lambda orden: "CAPITAL insuficiente"]))
-    assert resultado["decision"] == "nada"
-    assert resultado["puerta_que_rechazo"] == "CAPITAL insuficiente"
+def test_a_far_out_position_is_not_rolled():
+    """The negative control: always rolling would be worse than never rolling."""
+    far_out = dict(EXPIRES_SOON, expiry="2026-10-30")
+    result = cycle(NOW, **_env(positions=lambda: [far_out]))
+    assert result["decision"] != "rodar"
 
 
-def test_si_el_primero_esta_abierto_se_prueba_el_siguiente():
-    enviados = []
-    resultado = ciclo(AHORA, **_entorno(
-        cadena=lambda: [CONTRATO, OTRO],
-        posiciones=lambda: [ABIERTA],
-        enviar=lambda o: enviados.append(o) or {"id": "ord-1", **o}))
-
-    assert resultado["decision"] == "abrir", (
-        f"se bloqueo en el primero: {resultado['motivo']}")
-    assert resultado["orden"]["symbol"] == OTRO["symbol"]
+def test_rolling_respects_the_gates():
+    result = cycle(NOW, **_env(
+        positions=lambda: [EXPIRES_SOON],
+        gates=[lambda order: "CAPITAL insuficiente"]))
+    assert result["decision"] == "nada"
+    assert result["puerta_que_rechazo"] == "CAPITAL insuficiente"
 
 
-def test_con_toda_la_cadena_abierta_es_nada_con_motivo():
-    todas = [ABIERTA, {"underlying": "QQQ", "expiry": "2026-09-30", "qty": -1}]
-    resultado = ciclo(AHORA, **_entorno(
-        cadena=lambda: [CONTRATO, OTRO], posiciones=lambda: todas))
-    assert resultado["decision"] == "nada"
-    assert resultado["motivo"]
+def test_if_the_first_is_open_the_next_one_is_tried():
+    sent = []
+    result = cycle(NOW, **_env(
+        chain=lambda: [CONTRACT, OTHER],
+        positions=lambda: [OPEN_POSITION],
+        send=lambda o: sent.append(o) or {"id": "ord-1", **o}))
+
+    assert result["decision"] == "abrir", (
+        f"se bloqueo en el primero: {result['motivo']}")
+    assert result["orden"]["symbol"] == OTHER["symbol"]
 
 
-def test_el_primero_libre_se_sigue_prefiriendo():
-    """Control que impide 'arreglarlo' saltandose siempre el primero."""
-    resultado = ciclo(AHORA, **_entorno(cadena=lambda: [CONTRATO, OTRO]))
-    assert resultado["orden"]["symbol"] == CONTRATO["symbol"]
+def test_with_the_whole_chain_open_it_is_nada_with_a_reason():
+    all_positions = [OPEN_POSITION, {"underlying": "QQQ", "expiry": "2026-09-30", "qty": -1}]
+    result = cycle(NOW, **_env(
+        chain=lambda: [CONTRACT, OTHER], positions=lambda: all_positions))
+    assert result["decision"] == "nada"
+    assert result["motivo"]
+
+
+def test_the_first_free_one_is_still_preferred():
+    """Control that prevents 'fixing it' by always skipping the first one."""
+    result = cycle(NOW, **_env(chain=lambda: [CONTRACT, OTHER]))
+    assert result["orden"]["symbol"] == CONTRACT["symbol"]
+
+
+# --- N16: "rodar" has to CLOSE, not just say that it closes -----------------
+# My N14 criterion asked for the row to NAME the old and the new, and that is
+# satisfied just by writing the text. The delivery built ONE order -the
+# opening one-, logged it as "rodar", and left the old position open: the
+# agent was piling up risk while reporting rolls. A criterion that measures
+# the record and not the effect measures nothing. These cases COUNT CALLS TO
+# `send`.
+
+def _send_spy():
+    sent = []
+
+    def send(order):
+        sent.append(order)
+        return {"id": f"ord-{len(sent)}", **order}
+    return sent, send
+
+
+def test_rolling_sends_TWO_orders_one_closing_one_opening():
+    sent, send = _send_spy()
+    result = cycle(NOW, **_env(
+        positions=lambda: [EXPIRES_SOON], send=send))
+
+    assert result["decision"] == "rodar"
+    assert len(sent) == 2, (
+        f"una rodada son DOS patas y solo salieron {len(sent)}: "
+        "la posicion vieja se queda abierta")
+
+
+def test_the_closing_leg_is_on_the_expiring_contract_and_is_a_BUY():
+    """Closing a SOLD put means buying it back. If another sell comes out
+    instead, nothing was closed: the bet was doubled."""
+    sent, send = _send_spy()
+    cycle(NOW, **_env(positions=lambda: [EXPIRES_SOON], send=send))
+
+    closing_order = next((o for o in sent
+                          if o.get("symbol") == EXPIRES_SOON["symbol"]), None)
+    assert closing_order is not None, "ninguna orden toca el contrato que vence"
+    assert str(closing_order.get("side", "")).lower() == "buy", (
+        f"la pata de cierre salio como {closing_order.get('side')!r}")
+
+
+def test_if_the_close_FAILS_the_new_one_is_not_opened():
+    """A half-roll is worse than no roll: the old one would stay AND a new one."""
+    sent = []
+
+    def send(order):
+        sent.append(order)
+        if order.get("symbol") == EXPIRES_SOON["symbol"]:
+            raise ConnectionError("el cierre no salio")
+        return {"id": "ord", **order}
+
+    result = cycle(NOW, **_env(
+        positions=lambda: [EXPIRES_SOON], send=send))
+
+    assert result["decision"] == "nada"
+    openings = [o for o in sent
+                if o.get("symbol") != EXPIRES_SOON["symbol"]]
+    assert openings == [], "abrio la nueva con el cierre fallido"
+    assert "cierre" in result["motivo"].lower() or "cerrar" in result["motivo"].lower()
+
+
+def test_a_normal_open_still_sends_only_ONE_order():
+    """The control that prevents 'fixing it' by always sending two."""
+    sent, send = _send_spy()
+    result = cycle(NOW, **_env(send=send))
+
+    assert result["decision"] == "abrir"
+    assert len(sent) == 1
+
+
+def test_with_no_positions_an_empty_chain_does_not_say_OCCUPIED():
+    """Seen in the first real loop run: 'cadena entera ocupada: ' with an
+    empty list. Occupied and empty are different things, and the record said
+    the wrong one. My earlier test only required the reason to be non-empty."""
+    result = cycle(NOW, **_env(chain=lambda: [], positions=lambda: []))
+    assert result["decision"] == "nada"
+    assert "ocupada" not in result["motivo"].lower(), result["motivo"]

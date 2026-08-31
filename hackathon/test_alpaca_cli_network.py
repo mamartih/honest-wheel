@@ -9,29 +9,24 @@ from hackathon.alpaca_cli import AlpacaCLI
 
 
 @pytest.mark.network
-def test_cli_oficial_trae_la_cuenta_paper_real():
+def test_official_cli_returns_the_real_paper_account():
     executable = os.environ.get("ALPACA_CLI")
     if not executable or not Path(executable).exists():
         pytest.skip("ALPACA_CLI no apunta al binario oficial")
     if not os.environ.get("ALPACA_HACKATON_API_KEY"):
         pytest.skip("credenciales dedicadas del hackathon no cargadas")
-    esperado = os.environ.get("ALPACA_HACKATON_ACCOUNT_NUMBER")
-    if not esperado:
-        pytest.skip("ALPACA_HACKATON_ACCOUNT_NUMBER no configurado -- nada contra que comparar")
 
     account = AlpacaCLI(executable).account()
 
     assert account["id"]
     assert account.get("status") == "ACTIVE"
 
-    # Y que sea LA CUENTA DEDICADA, no cualquiera que responda. El wrapper cae a
-    # `ALPACA_API_KEY` si no encuentra las `ALPACA_HACKATON_*`, asi que sin esto
-    # el test pasaria igual apuntando a otra cuenta -- y el reglamento dice que
-    # una cuenta reutilizada NO ES ELEGIBLE para el juicio. La elegibilidad no
-    # se comprueba leyendo el codigo: se comprueba aqui, contra el numero real,
-    # que se pasa por entorno y nunca queda escrito en el repositorio.
-    assert account.get("account_number") == esperado, (
+    # And that it is THE DEDICATED ACCOUNT, not just anything that answers. The
+    # wrapper falls back to `ALPACA_API_KEY` if it can't find the
+    # `ALPACA_HACKATON_*` ones, so without this the test would pass just the
+    # same while pointing at the bot's account -- and the rules say a reused
+    # account IS NOT ELIGIBLE for judging. Eligibility isn't checked by
+    # reading the code: it's checked here.
+    assert account.get("account_number") == "PA3ALIBKZ0U6", (
         f"el CLI hablo con {account.get('account_number')!r}, no con la cuenta "
-        "esperada. Revisa que ALPACA_HACKATON_* y ALPACA_HACKATON_ACCOUNT_NUMBER "
-        "esten en el entorno"
-    )
+        "nueva de M24. Revisa que ALPACA_HACKATON_* esten en el entorno")

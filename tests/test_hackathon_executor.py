@@ -40,24 +40,24 @@ class Gateway:
     ({"now": datetime(2026, 8, 29, 11, 0, tzinfo=NY)}, "HORARIO"),
     ({"positions": [{"underlying": "SPY", "expiry": "2026-10-02"}]}, "IDEMPOTENCIA"),
 ])
-def test_cada_puerta_rechaza_y_registra_el_motivo(change, reason):
+def test_each_gate_rejects_and_records_the_reason(change, reason):
     rows = []
     kwargs = {"candidate": CANDIDATE, "buying_power": 100_000,
               "positions": [], "now": NOW}
     kwargs.update(change)
 
-    result = Executor(Gateway(), registrar=rows.append).execute(**kwargs)
+    result = Executor(Gateway(), record=rows.append).execute(**kwargs)
 
     assert result["decision"] == "rechazada"
     assert result["reason_code"] == reason
     assert rows[-1]["reason_code"] == reason
 
 
-def test_todas_abiertas_construye_orden_correcta_sin_enviarla():
+def test_all_gates_open_builds_the_correct_order_without_sending_it():
     gateway = Gateway()
     rows = []
 
-    result = Executor(gateway, registrar=rows.append).execute(
+    result = Executor(gateway, record=rows.append).execute(
         CANDIDATE, buying_power=100_000, positions=[], now=NOW,
     )
 
@@ -69,15 +69,15 @@ def test_todas_abiertas_construye_orden_correcta_sin_enviarla():
     assert rows[-1]["decision"] == "dry_run"
 
 
-def test_capital_csp_es_strike_por_cien_por_contratos():
+def test_csp_capital_is_strike_times_100_times_contracts():
     assert Executor.required_capital(CANDIDATE, qty=2) == 100_000
 
 
-def test_fallo_api_no_registra_una_posicion_parcial():
+def test_an_api_failure_does_not_record_a_partial_position():
     rows = []
     gateway = Gateway(error=RuntimeError("API caída"))
 
-    result = Executor(gateway, registrar=rows.append).execute(
+    result = Executor(gateway, record=rows.append).execute(
         CANDIDATE, buying_power=100_000, positions=[], now=NOW,
     )
 
@@ -86,47 +86,46 @@ def test_fallo_api_no_registra_una_posicion_parcial():
     assert all(row["decision"] != "abierta" for row in rows)
 
 
-# --- la concentracion se cuenta en contratos, no en el signo de qty --------
-#
-# Los casos de concentracion de arriba usan posiciones SIN `qty`, asi que
-# `pos.get("qty", 1)` vale 1 y la suma sale positiva. Una put VENDIDA -- que es
-# la estrategia entera -- llega de Alpaca con qty NEGATIVO, y entonces la suma
-# resta y la puerta no salta nunca.
+# --- reviewed at the gate on 28/08 ------------------------------------------
+# The concentration cases above use positions WITHOUT `qty`, so
+# `pos.get("qty", 1)` is 1 and the sum comes out positive. A SOLD put -- which
+# is the whole strategy -- arrives from Alpaca with a NEGATIVE qty, and then
+# the sum subtracts and the gate never trips.
 
-CORTAS = [{"underlying": "SPY", "expiry": "2026-10-02", "qty": -1},
+SHORTS = [{"underlying": "SPY", "expiry": "2026-10-02", "qty": -1},
           {"underlying": "SPY", "expiry": "2026-10-02", "qty": -1}]
 
 
-def test_la_concentracion_cuenta_contratos_no_signo():
-    ex = Executor(Gateway())
-    fila = ex.execute(CANDIDATE, buying_power=10_000_000,
-                      positions=CORTAS, now=NOW)
-    assert fila["decision"] == "rechazada"
-    assert fila["reason_code"] in ("CONCENTRACION_SUBYACENTE",
+def test_concentration_counts_contracts_not_sign():
+    executor = Executor(Gateway())
+    row = executor.execute(CANDIDATE, buying_power=10_000_000,
+                           positions=SHORTS, now=NOW)
+    assert row["decision"] == "rechazada"
+    assert row["reason_code"] in ("CONCENTRACION_SUBYACENTE",
                                   "CONCENTRACION_VENCIMIENTO", "IDEMPOTENCIA")
 
 
-def test_dos_cortas_en_otro_vencimiento_topan_por_subyacente():
-    """Sin idempotencia de por medio: aisla la puerta de concentracion."""
-    cortas = [dict(p, expiry="2026-09-18") for p in CORTAS]
-    ex = Executor(Gateway())
-    fila = ex.execute(CANDIDATE, buying_power=10_000_000,
-                      positions=cortas, now=NOW)
-    assert fila["reason_code"] == "CONCENTRACION_SUBYACENTE"
+def test_two_shorts_in_another_expiry_cap_out_by_underlying():
+    """No idempotency in the way: isolates the concentration gate."""
+    shorts = [dict(p, expiry="2026-09-18") for p in SHORTS]
+    executor = Executor(Gateway())
+    row = executor.execute(CANDIDATE, buying_power=10_000_000,
+                           positions=shorts, now=NOW)
+    assert row["reason_code"] == "CONCENTRACION_SUBYACENTE"
 
 
-def test_el_dry_run_es_un_parametro_y_no_un_candado():
-    """Un ejecutor que NUNCA puede enviar no ejecuta. El jurado mide P&L."""
+def test_dry_run_is_a_parameter_not_a_lock():
+    """An executor that can NEVER send does not execute. The jury measures P&L."""
     gw = Gateway(response={"id": "ord-1"})
-    fila = Executor(gw).execute(CANDIDATE, buying_power=10_000_000,
-                                positions=[], now=NOW, dry_run=False)
+    row = Executor(gw).execute(CANDIDATE, buying_power=10_000_000,
+                               positions=[], now=NOW, dry_run=False)
     assert gw.calls[0][1] is False, "el dry_run seguia fijo en el codigo"
-    assert fila["decision"] == "enviada"
+    assert row["decision"] == "enviada"
 
 
-def test_por_defecto_sigue_siendo_dry_run():
+def test_it_still_defaults_to_dry_run():
     gw = Gateway()
-    fila = Executor(gw).execute(CANDIDATE, buying_power=10_000_000,
-                                positions=[], now=NOW)
+    row = Executor(gw).execute(CANDIDATE, buying_power=10_000_000,
+                               positions=[], now=NOW)
     assert gw.calls[0][1] is True
-    assert fila["decision"] == "dry_run"
+    assert row["decision"] == "dry_run"
