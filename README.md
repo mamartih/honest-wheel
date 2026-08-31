@@ -144,8 +144,14 @@ history. `cycles_2026-08-29.jsonl` was cut at **2026-08-29 (UTC)** and holds
 rows have no timestamp**: until 29/08 only error cycles recorded one, a bug
 fixed the same day (every row now gets its own `cuando`) but not
 backfillable -- the missing hours are gone, not invented. Only the last row
-of this snapshot carries a real `cuando`. A later snapshot, once the fixed
-recorder has run for a full session, will show distinct timestamps per row.
+of this snapshot carries a real `cuando`.
+
+**`cycles_2026-08-31.jsonl` is that later snapshot**, and it is the one to
+read: 183 cycles, of which **90 carry a distinct timestamp** and 93 are the
+pre-fix rows described above. It was pulled from the machine the agent
+actually runs on, not from a developer checkout -- the exporter's default
+source is the VPS and a failed pull aborts the export rather than quietly
+publishing a stale copy. Last row: `2026-08-31T09:40:26+00:00`.
 
 ## Repository layout
 
