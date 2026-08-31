@@ -37,7 +37,13 @@ class CLIDouble:
         self.sent: list[tuple[dict, bool]] = []
 
     def account(self) -> dict:
-        return {"id": "acc-test", "status": "ACTIVE", "buying_power": self._buying_power}
+        # `options_buying_power` goes here because Alpaca returns it and the
+        # CAPITAL gate reads it. A double that omitted it let the 31/08 bug
+        # through a green suite: the code asked for a field the fixture had
+        # decided did not exist.
+        return {"id": "acc-test", "status": "ACTIVE",
+                "buying_power": self._buying_power,
+                "options_buying_power": self._buying_power}
 
     def positions(self) -> list[dict]:
         return list(self._positions)
@@ -331,7 +337,8 @@ def _entorno_con_candidato(tmp_path, ask):
 
     class CLIDoble:
         def account(self):
-            return {"account_number": "PA3ALIBKZ0U6", "buying_power": "1000000"}
+            return {"account_number": "PA3ALIBKZ0U6", "buying_power": "1000000",
+                    "options_buying_power": "1000000"}
 
         def positions(self):
             return []
@@ -408,3 +415,59 @@ def test_la_hora_del_CICLO_manda_sobre_la_del_escritor(tmp_path):
 
     fila = json.loads((tmp_path / "c.jsonl").read_text(encoding="utf-8").strip())
     assert fila["cuando"] == "2026-08-30T09:00:00"
+
+
+class CLIConMargen:
+    """Account with stock margin available but almost no options buying power.
+
+    This is the shape Alpaca returns once a cash-secured put is open: the
+    collateral is withheld from `options_buying_power` (non-marginable) while
+    `buying_power` still shows the marginable figure for equities.
+    """
+
+    def __init__(self):
+        self.sent: list[tuple[dict, bool]] = []
+
+    def account(self) -> dict:
+        return {"id": "acc-test", "status": "ACTIVE",
+                "buying_power": "103743.92",
+                "options_buying_power": "25935.98",
+                "non_marginable_buying_power": "25935.98",
+                "cash": "100535.98"}
+
+    def positions(self) -> list[dict]:
+        return []
+
+    def submit_option(self, order: dict, *, dry_run: bool = True) -> dict:
+        self.sent.append((order, dry_run))
+        return {"id": "ord-test", "dry_run": dry_run, **order}
+
+
+def test_capital_gate_uses_options_buying_power_not_margin():
+    """A cash-secured put cannot be margined: the gate must read the
+    non-marginable figure.
+
+    REGRESSION, 31/08/2026. The live agent passed its own CAPITAL gate
+    (74,194 < 103,743) and Alpaca refused the order with a 403:
+    "insufficient options buying power (required: 74194.01, available:
+    25935.98)". The gate was correct; it was handed the wrong magnitude.
+    """
+    from datetime import datetime, timezone
+
+    from hackathon.executor import Executor
+    from hackathon.live import _build_gate
+
+    cli = CLIConMargen()
+    executor = Executor(cli)
+    candidate = {"symbol": "SPY261002P00746000", "underlying": "SPY",
+                 "expiry": "2026-10-02", "strike": 746.0,
+                 "bid": 5.30, "ask": 5.40, "open_interest": 500, "volume": 50}
+    gate = _build_gate(executor, cli=cli, now_fn=lambda: datetime(
+        2026, 8, 31, 14, 0, tzinfo=timezone.utc), cache={candidate["symbol"]: candidate})
+
+    motivo = gate({"symbol": candidate["symbol"]})
+
+    assert motivo is not None, (
+        "la puerta aprobo una orden que el broker rechaza con 403: esta "
+        "midiendo contra el margen de acciones, no contra el efectivo")
+    assert "CAPITAL" in motivo, motivo

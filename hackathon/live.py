@@ -258,6 +258,31 @@ def _default_chain(*, executable: Optional[str], underlyings: list[str],
     return chain
 
 
+def _options_buying_power(account: dict) -> float:
+    """The cash a cash-secured put can actually consume.
+
+    NOT `buying_power`. That field is the MARGINABLE figure for equities and
+    on a Reg-T account it is roughly twice the cash; a short put's collateral
+    is withheld from the NON-marginable balance instead. Reading the wrong one
+    is not a rounding error, it is an order the broker refuses.
+
+    THIS COST A REAL ORDER, 31/08/2026. With one SPY put already open, the
+    agent's own CAPITAL gate compared 74,194 against `buying_power` 103,743,
+    approved, and Alpaca answered 403: "insufficient options buying power
+    (required: 74194.01, available: 25935.98)". The gate was right; it was
+    fed the wrong magnitude.
+
+    `buying_power` is deliberately NOT in the fallback chain. Putting it there
+    as a last resort would reintroduce the same defect the first day Alpaca
+    omits the options field -- silently, and only in production.
+    """
+    for campo in ("options_buying_power", "non_marginable_buying_power", "cash"):
+        valor = account.get(campo)
+        if valor not in (None, ""):
+            return float(valor)
+    return 0.0
+
+
 def _build_gate(executor: Executor, *, cli: AlpacaCLI,
                  now_fn: Callable[[], datetime],
                  cache: dict[str, dict]) -> Callable[[dict], Optional[str]]:
@@ -269,7 +294,7 @@ def _build_gate(executor: Executor, *, cli: AlpacaCLI,
     def gate(order: dict) -> Optional[str]:
         candidate = {**cache.get(order.get("symbol"), {}), **order}
         account = cli.account()
-        buying_power = float(account.get("buying_power") or account.get("cash") or 0)
+        buying_power = _options_buying_power(account)
         current_positions = cli.positions()
         result = executor.execute(
             candidate, buying_power=buying_power, positions=current_positions,
@@ -324,7 +349,7 @@ def _build_send(executor: Executor, *, cli: AlpacaCLI,
     def send(order: dict) -> dict:
         candidate = {**cache.get(order.get("symbol"), {}), **order}
         account = cli.account()
-        buying_power = float(account.get("buying_power") or account.get("cash") or 0)
+        buying_power = _options_buying_power(account)
         current_positions = cli.positions()
         result = executor.execute(
             candidate, buying_power=buying_power, positions=current_positions,

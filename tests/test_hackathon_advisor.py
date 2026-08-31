@@ -109,7 +109,8 @@ def test_as_a_gate_in_live_a_veto_ends_the_cycle_in_nada_with_its_reason(tmp_pat
             self.sent: list[tuple[dict, bool]] = []
 
         def account(self):
-            return {"id": "acc-test", "buying_power": 1_000_000.0}
+            return {"id": "acc-test", "buying_power": 1_000_000.0,
+                    "options_buying_power": 1_000_000.0}
 
         def positions(self):
             return []
@@ -154,7 +155,8 @@ def test_the_advisor_is_the_last_gate_a_cheap_rejection_skips_it(tmp_path):
 
     class CLIDouble:
         def account(self):
-            return {"id": "acc-test", "buying_power": 100.0}  # too little capital
+            return {"id": "acc-test", "buying_power": 100.0,
+                    "options_buying_power": 100.0}  # too little capital
 
         def positions(self):
             return []
