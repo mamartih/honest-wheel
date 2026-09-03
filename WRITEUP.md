@@ -141,30 +141,47 @@ would be a loaded gun.
 
 ---
 
-## P&L, as of 31 Aug 2026
+## P&L, as of 3 Sep 2026
 
 The page promises a P&L next to its error bar, so here is both.
 
 ```
-equity      $100,000.00     starting balance, unchanged
-positions   0
-orders      0
-cycles      183, each one logged with its decision and reason
-MDE vs SPY  0.7658 Sharpe
+equity            $100,202.91      +$202.91   ·   +0.20%
+open position     SPY 746 PUT, exp. 2026-10-02, 1 contract short
+  premium taken   $536
+  current value   $333
+  unrealised      +$203
+cycles            513, each one logged with its decision and reason
+trades            1 opened, 0 closed
+MDE vs SPY        0.7658 Sharpe
 ```
 
-**No trades yet, and the reason is in the log rather than in a paragraph.**
-`turn_of_month` evaluates the last *completed* daily bar. Through 30 Aug that
-bar was Friday 28 Aug — one day short of the window, which opens on the second
-market day before month end. Every one of the 183 cycles recorded
-`sin candidatos: ningun subyacente paso el filtro`, with the failing leg named
-per underlying.
+**+0.20% over four sessions. That is inside the noise band and we are not
+going to pretend otherwise.** With a minimum detectable effect of 0.7658
+Sharpe, a week cannot tell this apart from luck — it would look the same if
+the strategy had no edge at all. The number is real; what it is *evidence of*
+is nothing yet.
 
-This section is rewritten from the live account before submission. If the agent
-trades, the P&L goes here beside the 0.7658. **If it never trades, that goes
-here unedited too.** An agent that declines when its conditions are absent is
-working; an agent that relaxes them to have a number to show is not, and this
-whole page would be worthless coming from the second one.
+**The agent traded once, and then spent 202 cycles being told it could not
+trade again.** A cash-secured put on SPY withholds $74,600 of collateral, which
+is three quarters of the account, so nothing else fit. That is not a
+malfunction — it is what a fully collateralised put costs — but it does mean
+this week's sample is one position, not a strategy.
+
+Two things happened in those four days that are worth more than the P&L:
+
+- **The broker rejected an order our own CAPITAL gate had approved** (403,
+  "insufficient options buying power"). The gate was reading the marginable
+  equity figure instead of the non-marginable one. Fixed the same day, with the
+  regression test written first — and fixing it exposed that three CLI test
+  doubles returned an account object missing that field, which is why a green
+  suite had never caught it.
+- **The LLM advisor ran inside the live loop for the first time**, logged as
+  `consulted: true, veto: false` on the cycle that opened the position. It has
+  been consulted twice: once per candidate that survived every deterministic
+  gate.
+
+Both are in `evidence/` and in the commit history, timestamped.
 
 ---
 
